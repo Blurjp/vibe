@@ -1,19 +1,20 @@
 # vibe
 
-A tiny CLI tool for macOS that captures screen regions and asks Claude Code CLI to debug/fix issues using that image plus repository context.
+A tiny CLI tool for macOS that captures screen regions and helps debug issues using Claude Code CLI.
 
 ## Features
 
 - **Region screenshot capture** - Select any area of your screen to debug
 - **Context collection** - Automatically includes git status, diffs, and terminal logs
-- **Claude Code integration** - Passes everything to Claude Code CLI for analysis
+- **Claude Code integration** - Works seamlessly with Claude Code CLI
 - **Session tracking** - Maintains a log of debugging sessions
+- **Single workflow** - Do everything from within Claude Code CLI
 
 ## Requirements
 
 - macOS (uses `screencapture` command)
 - Node.js
-- Claude Code CLI installed and on PATH
+- Claude Code CLI installed
 
 ## Installation
 
@@ -24,22 +25,52 @@ A tiny CLI tool for macOS that captures screen regions and asks Claude Code CLI 
 ./tools/vibe/vibe init
 ```
 
-This creates `.vibedbg/` directory and adds it to `.gitignore`.
+3. Set up Claude Code integration (creates slash commands):
+
+```bash
+cp tools/vibe/claude-commands/*.md ~/.claude/commands/
+```
+
+This creates:
+- `.vibedbg/` directory for screenshots
+- Claude Code commands (`/vibe-select`, `/vibe-ask`)
 
 ## Usage
 
-### 1. Capture a screen region
+### Recommended: Use within Claude Code CLI
+
+Everything happens in one interface:
 
 ```bash
-./tools/vibe/vibe select --note "login error on submit"
+# Start Claude Code CLI
+claude
+
+# Then inside Claude Code, use:
+/vibe-select          # Capture screen region
+/vibe-ask             # Analyze and fix the issue
+```
+
+### Alternative: Direct CLI commands
+
+```bash
+./tools/vibe/vibe select --note "login error"
+./tools/vibe/vibe ask "Fix the error"
+```
+
+## Workflow
+
+### 1. Capture the issue
+
+```bash
+/vibe-select
 ```
 
 This opens macOS's screenshot tool. Select the region showing the error/bug.
 The screenshot is saved to `.vibedbg/region.png`.
 
-### 2. (Optional) Add terminal/backend logs
+### 2. (Optional) Add logs
 
-If you have backend errors or stack traces, paste them into the log file:
+If you have backend errors or stack traces:
 
 ```bash
 pbpaste > .vibedbg/terminal.log
@@ -48,18 +79,25 @@ pbpaste > .vibedbg/terminal.log
 ### 3. Ask Claude to fix it
 
 ```bash
-./tools/vibe/vibe ask "Fix the error shown in the screenshot"
+/vibe-ask
 ```
 
-This generates a prompt containing:
-- The screenshot reference
-- Git status and diffs
-- Recent terminal logs
-- Your instruction
+Claude will:
+1. Read the screenshot
+2. Check git status and diffs
+3. Review terminal logs
+4. Search the codebase
+5. Propose and implement fixes
+6. Verify the changes
 
-Then passes it to Claude Code CLI.
+## Claude Code Commands
 
-## Commands
+| Command | Description |
+|---------|-------------|
+| `/vibe-select` | Capture a screen region |
+| `/vibe-ask` | Analyze screenshot and fix issues |
+
+## Direct CLI Commands
 
 | Command | Description |
 |---------|-------------|
@@ -79,7 +117,12 @@ Then passes it to Claude Code CLI.
 ## Examples
 
 ```bash
-# Basic debugging
+# Using Claude Code CLI (recommended)
+claude
+> /vibe-select
+> /vibe-ask
+
+# Using direct CLI
 ./tools/vibe/vibe select --note "500 error on API call"
 ./tools/vibe/vibe ask "Fix the API error shown"
 
@@ -88,9 +131,6 @@ Then passes it to Claude Code CLI.
 
 # Skip git context
 ./tools/vibe/vibe ask "Just look at the screenshot" --no-diff
-
-# Use specific model
-./tools/vibe/vibe ask "Explain this error" --model claude-opus-4-5
 ```
 
 ## Optional: Shell Alias
@@ -101,7 +141,7 @@ Add to `~/.zshrc` or `~/.bashrc`:
 alias vibe="$PWD/tools/vibe/vibe"
 ```
 
-Then use simply:
+Then use:
 
 ```bash
 vibe select --note "what this is"
@@ -116,18 +156,32 @@ vibe ask "Fix the bug"
 ├── region.json     # Capture metadata (timestamp, note)
 ├── session.md      # Session log for tracking debug sessions
 └── terminal.log    # Terminal/backend logs (you populate this)
+
+~/.claude/commands/
+├── vibe-select.md  # Claude Code: Capture screenshot
+└── vibe-ask.md     # Claude Code: Analyze and fix
 ```
 
 ## How It Works
 
-1. **Capture**: `vibe select` uses `screencapture -i` to select a region
-2. **Collect**: `vibe ask` gathers context:
+1. **Capture**: `/vibe-select` uses `screencapture -i` to select a region
+2. **Collect**: `/vibe-ask` gathers context:
    - Screenshot file path
    - Git branch, status, and diffs
    - Terminal logs (last N lines)
-3. **Prompt**: Builds a structured prompt for Claude Code
-4. **Delegate**: Calls `claude` CLI with the prompt
-5. **Track**: Updates session log with results
+3. **Analyze**: Claude Code reads the screenshot and identifies issues
+4. **Fix**: Proposes and implements surgical fixes
+5. **Verify**: Runs commands to confirm the fix works
+
+## Debugging Process
+
+When you use `/vibe-ask`, Claude follows this process:
+
+1. **Facts Observed**: Lists visible errors, stack traces, filenames
+2. **Hypotheses**: Ranks possible causes
+3. **Evidence Gathered**: Searches codebase, opens relevant files
+4. **Fix Implemented**: Makes smallest safe change
+5. **Verification**: Confirms the fix works
 
 ## License
 
