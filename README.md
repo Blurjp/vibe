@@ -170,13 +170,27 @@ vibe ask "Debug this" --logs /tmp/backend.log --tail 500
 vibe ask "Just look at the screenshot" --no-diff
 ```
 
-## Optional: Shell Alias
+## Installation Details
 
-The install.sh script automatically adds a `vibe` alias to your shell config. If you need to add it manually:
+The install.sh script:
+1. Clones/updates vibe to `~/.vibe/vibe/`
+2. Creates a symlink: `~/.local/bin/vibe`
+3. Adds `~/.local/bin` to your PATH in `~/.zshrc` (or `~/.bashrc`)
+4. Installs Claude Code commands to `~/.claude/commands/` and `~/.claude-glm/commands/`
+
+If you need to set up manually:
 
 ```bash
-# Add to ~/.zshrc or ~/.bashrc
-alias vibe="$HOME/.vibe/vibe/tools/vibe/vibe"
+# Create symlink
+mkdir -p ~/.local/bin
+ln -s ~/.vibe/vibe/tools/vibe/vibe ~/.local/bin/vibe
+
+# Add to PATH (add to ~/.zshrc or ~/.bashrc)
+export PATH="$HOME/.local/bin:$PATH"
+
+# Install Claude Code commands
+cp ~/.vibe/vibe/tools/vibe/claude-commands/*.md ~/.claude/commands/
+cp ~/.vibe/vibe/tools/vibe/claude-commands/*.md ~/.claude-glm/commands/
 ```
 
 Then use:
