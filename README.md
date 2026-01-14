@@ -18,6 +18,22 @@ A tiny CLI tool for macOS that captures screen regions and helps debug issues us
 
 ## Installation
 
+### Quick Install (one command)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Blurjp/vibe/main/install.sh | bash
+```
+
+Or clone and run:
+
+```bash
+git clone https://github.com/Blurjp/vibe.git
+cd vibe
+./install.sh
+```
+
+### Manual Install
+
 1. Clone this repo
 2. Run the init command:
 
