@@ -1,0 +1,298 @@
+#!/usr/bin/env node
+/**
+ * vibe: a tiny CLI to capture a screen region and ask Claude Code CLI to debug/fix using that image + repo context.
+ * macOS only (uses screencapture).
+ *
+ * Commands:
+ *   vibe init
+ *   vibe select [--note "text"]
+ *   vibe ask "your instruction" [--model "claude-..."] [--no-diff] [--logs <path>] [--tail <n>]
+ *
+ * Assumptions:
+ *   - You have Claude Code CLI installed and callable as `claude`.
+ *   - Claude Code can read local files mentioned in the prompt (we point it to .vibedbg/region.png).
+ */
+
+const { spawnSync, execSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = process.cwd();
+const VDIR = path.join(ROOT, ".vibedbg");
+const REGION = path.join(VDIR, "region.png");
+const META = path.join(VDIR, "region.json");
+const SESSION = path.join(VDIR, "session.md");
+const DEFAULT_LOG = path.join(VDIR, "terminal.log");
+
+function die(msg, code = 1) {
+  console.error(`\n[vibe] ${msg}\n`);
+  process.exit(code);
+}
+
+function run(cmd, args, opts = {}) {
+  const r = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf-8", ...opts });
+  return r;
+}
+
+function sh(command) {
+  return execSync(command, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function exists(p) {
+  try { fs.accessSync(p); return true; } catch { return false; }
+}
+
+function ensureDir(p) {
+  fs.mkdirSync(p, { recursive: true });
+}
+
+function appendFile(p, text) {
+  fs.appendFileSync(p, text, "utf-8");
+}
+
+function isoNow() {
+  return new Date().toISOString();
+}
+
+function gitSafe(cmd) {
+  try { return sh(cmd); } catch { return ""; }
+}
+
+function tailFile(filePath, n) {
+  if (!exists(filePath)) return "";
+  try {
+    return sh(`tail -n ${n} ${JSON.stringify(filePath)}`);
+  } catch {
+    return "";
+  }
+}
+
+function init() {
+  ensureDir(VDIR);
+
+  // .gitignore: add .vibedbg if missing
+  const gi = path.join(ROOT, ".gitignore");
+  if (exists(gi)) {
+    const content = fs.readFileSync(gi, "utf-8");
+    if (!content.includes("\n.vibedbg/\n") && !content.includes("\n.vibedbg\n")) {
+      appendFile(gi, `\n# vibe debug artifacts\n.vibedbg/\n`);
+      console.log("[vibe] Added .vibedbg/ to .gitignore");
+    }
+  } else {
+    fs.writeFileSync(gi, `# vibe debug artifacts\n.vibedbg/\n`, "utf-8");
+    console.log("[vibe] Created .gitignore with .vibedbg/");
+  }
+
+  if (!exists(SESSION)) {
+    fs.writeFileSync(
+      SESSION,
+      `# VibeDebug Session Log\n\nThis file is appended by vibe.\n\n`,
+      "utf-8"
+    );
+  }
+
+  if (!exists(DEFAULT_LOG)) {
+    fs.writeFileSync(
+      DEFAULT_LOG,
+      `# Put any copied terminal output here (optional)\n# e.g. paste backend stack traces or dev server logs.\n`,
+      "utf-8"
+    );
+  }
+
+  console.log("[vibe] Initialized .vibedbg/");
+  console.log(`[vibe] Next: ./tools/vibe/vibe select`);
+}
+
+function select(note) {
+  ensureDir(VDIR);
+
+  // Interactive region selection
+  // -i : interactive
+  // -o : no shadow
+  // -x : no sound
+  const args = ["-i", "-o", "-x", REGION];
+  console.log("[vibe] Select a region on screen… (Esc to cancel)");
+
+  const r = run("screencapture", args);
+  if (r.status !== 0) {
+    die("Screenshot cancelled or failed.");
+  }
+  if (!exists(REGION)) die("Screenshot not saved.");
+
+  const meta = {
+    capturedAt: isoNow(),
+    note: note || "",
+    regionPath: path.relative(ROOT, REGION),
+  };
+  fs.writeFileSync(META, JSON.stringify(meta, null, 2), "utf-8");
+
+  appendFile(
+    SESSION,
+    `\n## Capture ${meta.capturedAt}\n- region: \`${meta.regionPath}\`\n- note: ${meta.note || "(none)"}\n`
+  );
+
+  console.log(`[vibe] Saved: ${path.relative(ROOT, REGION)}`);
+}
+
+function buildPrompt(userInstruction, opts) {
+  const relRegion = path.relative(ROOT, REGION);
+  const relMeta = path.relative(ROOT, META);
+  const relSession = path.relative(ROOT, SESSION);
+
+  const gitStatus = gitSafe("git status --porcelain=v1");
+  const gitBranch = gitSafe("git rev-parse --abbrev-ref HEAD");
+  const diffStat = opts.noDiff ? "" : gitSafe("git diff --stat");
+  const diffSnippet = opts.noDiff ? "" : gitSafe("git diff --unified=3 | head -n 400");
+
+  const logsPath = opts.logsPath || DEFAULT_LOG;
+  const tailN = opts.tailN || 200;
+  const logsTail = tailFile(logsPath, tailN);
+
+  // Build diff section
+  let diffSection = "";
+  if (!opts.noDiff) {
+    diffSection = `
+- Git diff stat:
+${diffStat || "(none)"}
+
+- Git diff snippet (first ~400 lines):
+${diffSnippet || "(none)"}`;
+  }
+
+  // IMPORTANT: we DO NOT embed image bytes. We point Claude Code to read the local file.
+  // If your Claude CLI supports attaching files, you can extend this later.
+  return `
+You are Claude Code acting as a "Screen-Region Debugger" for a desktop screenshot region.
+You MUST treat the screenshot as primary evidence and avoid guessing.
+
+PRIMARY EVIDENCE FILES (read these from disk):
+- Screenshot: ${relRegion}
+- Capture meta: ${relMeta}
+- Session log: ${relSession}
+
+USER INSTRUCTION:
+${userInstruction || "(none)"}
+
+REPO CONTEXT (auto-collected):
+- Repo root: ${ROOT}
+- Git branch: ${gitBranch || "(unknown)"}
+- Git status (porcelain):
+${gitStatus || "(clean or unavailable)"}${diffSection}
+
+RECENT TERMINAL / SERVER LOG TAIL (best-effort):
+- Source file: ${path.relative(ROOT, logsPath)}
+- Last ${tailN} lines:
+${logsTail || "(no logs found; if relevant, paste logs into .vibedbg/terminal.log or pass --logs <path>)"}
+
+STRICT PROCESS (follow exactly):
+1) Facts Observed: read the screenshot and list visible error messages, status codes, stack trace lines, filenames, line numbers, URLs, or any clues. If unreadable, say so.
+2) Hypotheses (ranked 2–4) and what repo evidence would confirm.
+3) Evidence Gathered: run ripgrep searches based on strings/filenames from the screenshot; open relevant files; run minimal commands if needed.
+4) Fix Implemented: make the smallest safe change. Prefer surgical edits.
+5) Verification: run the most direct command to confirm (infer from package.json/README if not provided). Summarize results.
+6) Append a short entry to ${relSession} with what you did (facts, hypothesis, commands, changed files, verification).
+
+Do NOT:
+- Assume it's a browser.
+- Hallucinate screenshot content.
+- Do large refactors.
+- Add new dependencies unless absolutely necessary.
+`.trim();
+}
+
+function ask(userInstruction, opts) {
+  if (!exists(REGION)) {
+    die(`No screenshot found at ${path.relative(ROOT, REGION)}. Run: vibe select`);
+  }
+  if (!exists(SESSION)) {
+    ensureDir(VDIR);
+    fs.writeFileSync(SESSION, `# VibeDebug Session Log\n\n`, "utf-8");
+  }
+
+  const prompt = buildPrompt(userInstruction, opts);
+
+  // Call Claude Code CLI.
+  // We pass the prompt as a single argument. If your CLI prefers stdin, swap to spawnSync with input.
+  const claudeArgs = [];
+  if (opts.model) {
+    // Some CLIs support --model; if yours doesn't, remove this.
+    claudeArgs.push("--model", opts.model);
+  }
+  claudeArgs.push(prompt);
+
+  console.log("[vibe] Launching Claude Code CLI…");
+  const r = spawnSync("claude", claudeArgs, { stdio: "inherit" });
+
+  if (r.error) {
+    die(`Failed to run 'claude'. Is Claude Code CLI installed and on PATH?\n${String(r.error)}`);
+  }
+  if (r.status !== 0) {
+    die(`Claude exited with status ${r.status}`);
+  }
+}
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+  const cmd = args[0];
+  const rest = args.slice(1);
+
+  const opts = {
+    note: "",
+    model: "",
+    noDiff: false,
+    logsPath: "",
+    tailN: 200,
+  };
+
+  let instruction = "";
+
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a === "--note") opts.note = rest[++i] || "";
+    else if (a === "--model") opts.model = rest[++i] || "";
+    else if (a === "--no-diff") opts.noDiff = true;
+    else if (a === "--logs") opts.logsPath = rest[++i] || "";
+    else if (a === "--tail") opts.tailN = parseInt(rest[++i] || "200", 10);
+    else if (!a.startsWith("--")) {
+      // for 'ask', everything not an option becomes part of instruction
+      instruction = instruction ? `${instruction} ${a}` : a;
+    }
+  }
+
+  return { cmd, instruction, opts };
+}
+
+function help() {
+  console.log(`
+vibe (macOS) — capture a screen region and ask Claude Code CLI to debug/fix using that image.
+
+Usage:
+  vibe init
+  vibe select [--note "what you captured"]
+  vibe ask "instruction" [--model "claude-..."] [--no-diff] [--logs <path>] [--tail <n>]
+
+Examples:
+  vibe init
+  vibe select --note "Backend 500 error on submit"
+  vibe ask "Fix the error shown in the screenshot" --logs .vibedbg/terminal.log --tail 200
+
+Notes:
+- vibe select uses: screencapture -i
+- Put dev server / backend logs into .vibedbg/terminal.log (or pass --logs <path>)
+`.trim());
+}
+
+(function main() {
+  const { cmd, instruction, opts } = parseArgs(process.argv);
+
+  if (!cmd || cmd === "-h" || cmd === "--help" || cmd === "help") return help();
+
+  if (cmd === "init") return init();
+  if (cmd === "select") return select(opts.note);
+  if (cmd === "ask") {
+    if (!instruction) die(`Missing instruction. Example: vibe ask "Fix the error shown in the screenshot"`);
+    return ask(instruction, opts);
+  }
+
+  die(`Unknown command: ${cmd}\nRun: vibe --help`);
+})();
