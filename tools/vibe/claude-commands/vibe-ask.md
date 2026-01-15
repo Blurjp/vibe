@@ -7,12 +7,21 @@ Please help me analyze an issue shown in a screenshot.
 First, check if the screenshot exists and gather context:
 
 ```bash
-ls -la .vibedbg/
-cat .vibedbg/region.json 2>/dev/null
-git status --porcelain=v1
-git diff --stat 2>/dev/null
-tail -n 200 .vibedbg/terminal.log 2>/dev/null
-echo "Screenshot path: $(pwd)/.vibedbg/region.png"
+START_DIR="$(pwd)"
+ROOT="$START_DIR"
+while [ "$ROOT" != "/" ] && [ ! -d "$ROOT/.vibedbg" ]; do
+  ROOT="$(dirname "$ROOT")"
+done
+if [ ! -d "$ROOT/.vibedbg" ]; then
+  ROOT="$(git -C "$START_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$START_DIR")"
+fi
+
+ls -la "$ROOT/.vibedbg/"
+cat "$ROOT/.vibedbg/region.json" 2>/dev/null
+git -C "$ROOT" status --porcelain=v1
+git -C "$ROOT" diff --stat 2>/dev/null
+tail -n 200 "$ROOT/.vibedbg/terminal.log" 2>/dev/null
+echo "Screenshot path: $ROOT/.vibedbg/region.png"
 ```
 
 Then:

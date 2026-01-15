@@ -53,6 +53,8 @@ This creates Claude Code commands (`/vibe-select`, `/vibe-ask`) that work global
 
 **vibe installs once globally, then works in any project folder.**
 
+If you run commands from a subdirectory, vibe will locate the nearest `.vibedbg/` or fall back to the git root.
+
 ### Recommended: Use within Claude Code CLI (or ccg)
 
 Everything happens in one interface:

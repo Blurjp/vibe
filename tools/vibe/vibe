@@ -17,7 +17,39 @@ const { spawnSync, execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const ROOT = process.cwd();
+const CWD = process.cwd();
+
+function findExistingVibeRoot(startDir) {
+  let dir = startDir;
+  while (true) {
+    if (fs.existsSync(path.join(dir, ".vibedbg"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return "";
+}
+
+function gitRootFrom(dir) {
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: dir,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function detectRoot() {
+  const vibeRoot = findExistingVibeRoot(CWD);
+  if (vibeRoot) return vibeRoot;
+  const gitRoot = gitRootFrom(CWD);
+  return gitRoot || CWD;
+}
+
+const ROOT = detectRoot();
 const VDIR = path.join(ROOT, ".vibedbg");
 const REGION = path.join(VDIR, "region.png");
 const META = path.join(VDIR, "region.json");
@@ -34,8 +66,12 @@ function run(cmd, args, opts = {}) {
   return r;
 }
 
-function sh(command) {
-  return execSync(command, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+function sh(command, opts = {}) {
+  return execSync(command, {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+    ...opts,
+  }).trim();
 }
 
 function exists(p) {
@@ -55,7 +91,7 @@ function isoNow() {
 }
 
 function gitSafe(cmd) {
-  try { return sh(cmd); } catch { return ""; }
+  try { return sh(cmd, { cwd: ROOT }); } catch { return ""; }
 }
 
 function tailFile(filePath, n) {
@@ -135,18 +171,19 @@ function select(note) {
 }
 
 function buildPrompt(userInstruction, opts) {
-  const relRegion = path.relative(ROOT, REGION);
-  const relMeta = path.relative(ROOT, META);
-  const relSession = path.relative(ROOT, SESSION);
+  const relRegion = path.relative(CWD, REGION);
+  const relMeta = path.relative(CWD, META);
+  const relSession = path.relative(CWD, SESSION);
 
   const gitStatus = gitSafe("git status --porcelain=v1");
   const gitBranch = gitSafe("git rev-parse --abbrev-ref HEAD");
   const diffStat = opts.noDiff ? "" : gitSafe("git diff --stat");
   const diffSnippet = opts.noDiff ? "" : gitSafe("git diff --unified=3 | head -n 400");
 
-  const logsPath = opts.logsPath || DEFAULT_LOG;
+  const logsPath = opts.logsPath ? path.resolve(CWD, opts.logsPath) : DEFAULT_LOG;
   const tailN = opts.tailN || 200;
   const logsTail = tailFile(logsPath, tailN);
+  const relLogsPath = path.relative(CWD, logsPath);
 
   // Build diff section
   let diffSection = "";
@@ -180,7 +217,7 @@ REPO CONTEXT (auto-collected):
 ${gitStatus || "(clean or unavailable)"}${diffSection}
 
 RECENT TERMINAL / SERVER LOG TAIL (best-effort):
-- Source file: ${path.relative(ROOT, logsPath)}
+- Source file: ${relLogsPath}
 - Last ${tailN} lines:
 ${logsTail || "(no logs found; if relevant, paste logs into .vibedbg/terminal.log or pass --logs <path>)"}
 
