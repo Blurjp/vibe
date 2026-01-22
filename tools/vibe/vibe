@@ -49,7 +49,6 @@ function detectRoot() {
 
 const ROOT = detectRoot();
 const VDIR = path.join(ROOT, ".vibedbg");
-const REGION = path.join(VDIR, "region.png");
 const META = path.join(VDIR, "region.json");
 const SESSION = path.join(VDIR, "session.md");
 const DEFAULT_LOG = path.join(VDIR, "terminal.log");
@@ -86,6 +85,18 @@ function appendFile(p, text) {
 
 function isoNow() {
   return new Date().toISOString();
+}
+
+function getRegionPath() {
+  if (exists(META)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(META, "utf-8"));
+      if (meta.regionPath) {
+        return path.join(ROOT, meta.regionPath);
+      }
+    } catch {}
+  }
+  return path.join(VDIR, "region.png");  // fallback for backward compatibility
 }
 
 function gitSafe(cmd) {
@@ -140,23 +151,28 @@ function init() {
 function select(note) {
   ensureDir(VDIR);
 
+  // Generate timestamped filename to bypass CDN caching
+  const timestamp = Date.now();
+  const regionFile = `region_${timestamp}.png`;
+  const regionPath = path.join(VDIR, regionFile);
+
   // Interactive region selection
   // -i : interactive
   // -o : no shadow
   // -x : no sound
-  const args = ["-i", "-o", "-x", REGION];
+  const args = ["-i", "-o", "-x", regionPath];
   console.log("[vibe] Select a region on screen… (Esc to cancel)");
 
   const r = run("screencapture", args);
   if (r.status !== 0) {
     die("Screenshot cancelled or failed.");
   }
-  if (!exists(REGION)) die("Screenshot not saved.");
+  if (!exists(regionPath)) die("Screenshot not saved.");
 
   const meta = {
     capturedAt: isoNow(),
     note: note || "",
-    regionPath: path.relative(ROOT, REGION),
+    regionPath: path.join(".vibedbg", regionFile),  // Store relative path
   };
   fs.writeFileSync(META, JSON.stringify(meta, null, 2), "utf-8");
 
@@ -165,11 +181,12 @@ function select(note) {
     `\n## Capture ${meta.capturedAt}\n- region: \`${meta.regionPath}\`\n- note: ${meta.note || "(none)"}\n`
   );
 
-  console.log(`[vibe] Saved: ${path.relative(ROOT, REGION)}`);
+  console.log(`[vibe] Saved: ${meta.regionPath}`);
 }
 
 function buildPrompt(userInstruction, opts) {
-  const relRegion = path.relative(CWD, REGION);
+  const currentRegion = getRegionPath();
+  const relRegion = path.relative(CWD, currentRegion);
   const relMeta = path.relative(CWD, META);
   const relSession = path.relative(CWD, SESSION);
 
@@ -236,8 +253,9 @@ Do NOT:
 }
 
 function ask(userInstruction, opts) {
-  if (!exists(REGION)) {
-    die(`No screenshot found at ${path.relative(ROOT, REGION)}. Run: vibe select`);
+  const currentRegion = getRegionPath();
+  if (!exists(currentRegion)) {
+    die(`No screenshot found. Run: vibe select`);
   }
   if (!exists(SESSION)) {
     ensureDir(VDIR);
