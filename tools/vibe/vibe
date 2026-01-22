@@ -43,8 +43,6 @@ function gitRootFrom(dir) {
 }
 
 function detectRoot() {
-  const vibeRoot = findExistingVibeRoot(CWD);
-  if (vibeRoot) return vibeRoot;
   const gitRoot = gitRootFrom(CWD);
   return gitRoot || CWD;
 }
