@@ -15,7 +15,12 @@ cat "$ROOT/.vibedbg/region.json" 2>/dev/null
 git -C "$ROOT" status --porcelain=v1
 git -C "$ROOT" diff --stat 2>/dev/null
 tail -n 200 "$ROOT/.vibedbg/terminal.log" 2>/dev/null
-echo "Screenshot path: $ROOT/.vibedbg/region.png"
+# Get current screenshot path from region.json
+REGION_PATH="$ROOT/.vibedbg/region.png"
+if [ -f "$ROOT/.vibedbg/region.json" ]; then
+  REGION_PATH="$ROOT/$(grep -o '"regionPath": *"[^"]*"' "$ROOT/.vibedbg/region.json" | cut -d'"' -f4)"
+fi
+echo "Screenshot path: $REGION_PATH"
 ```
 
 Then:
